@@ -188,7 +188,7 @@
   // ===== 1. إعدادات MQTT (المشفرة WSS لـ HTTPS/GitHub Pages) =====
   const broker = "broker.hivemq.com";
   const port = 8884; // منفذ WebSockets المشفر (SSL)
-  const topic = "fatima_robot_arm_2026/control"; // يطابق تماماً ما في كود ESP32
+  const topic = "ZM070_5G_EXT/control"; // يطابق تماماً ما في كود ESP32
 
   const clientID = "WebClient_" + Math.random().toString(16).substr(2, 8);
   const client = new Paho.MQTT.Client(broker, port, clientID);
