@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>التحكم بالذراع الآلية - ESP32 Telecontrol</title>
+
+<!-- مكتبة Paho MQTT للاتصال بخادم MQTT عبر WebSockets من المتصفح -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+<style>
+  :root {
+    --primary-color: #2563eb;
+    --bg-color: #f8fafc;
+    --card-bg: #ffffff;
+    --text-color: #1e293b;
+  }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    margin: 0;
+    padding: 20px;
+    direction: rtl;
+    user-select: none;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 25px;
+  }
+
+  h1 {
+    margin: 0 0 10px 0;
+    font-size: 1.8rem;
+    color: #0f172a;
+  }
+
+  #status-container {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+  }
+
+  .status-connecting { background-color: #fef08a; color: #854d0e; }
+  .status-online { background-color: #dcfce7; color: #166534; }
+  .status-offline { background-color: #fee2e2; color: #991b1b; }
+
+  /* تخطيط الصفحة الرئيسي */
+  .main-layout {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 25px;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .panel-left {
+    flex: 1;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .panel-right {
+    flex: 1.1;
+    min-width: 340px;
+  }
+
+  .card {
+    background: var(--card-bg);
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border: 1px solid #e2e8f0;
+    text-align: center;
+  }
+
+  .card h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    color: #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .val-badge {
+    background: #eff6ff;
+    color: var(--primary-color);
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+  }
+
+  /* السلايدرات */
+  .slider {
+    width: 100%;
+    height: 8px;
+    border-radius: 5px;
+    background: #cbd5e1;
+    outline: none;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+  }
+
+  /* المربع التفاعلي (Joystick Container) مقاس 325px */
+  #joystick-container {
+    position: relative;
+    width: 325px;
+    height: 325px;
+    background: #e2e8f0;
+    border-radius: 20px;
+    margin: 10px auto;
+    touch-action: none;
+    border: 3px solid #cbd5e1;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  /* مقبض المربع المكبر (Handle 50px) */
+  #joystick-handle {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    top: 137.5px; /* منتصف المربع تلقائياً */
+    left: 137.5px;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
+    cursor: pointer;
+    transition: transform 0.05s ease;
+  }
+
+  #joystick-handle:active {
+    transform: scale(1.1);
+  }
+
+  .coord-display {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: #64748b;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>نظام التحكم بالذراع الآلية عبر الإنترنت</h1>
+  <div id="status-container" class="status-connecting">جاري الاتصال بخادم MQTT...</div>
+</header>
+
+<div class="main-layout">
+
+  <!-- القسم الأيسر: السلايدرات -->
+  <div class="panel-left">
+    
+    <!-- محرك القاعدة -->
+    <div class="card">
+      <h3>القاعدة (Base) <span id="val-base" class="val-badge">90°</span></h3>
+      <input type="range" min="0" max="180" value="90" class="slider" oninput="updateSlider('base', this.value)">
+    </div>
+
+    <!-- محرك المعصم -->
+    <div class="card">
+      <h3>المعصم (Wrist Joint) <span id="val-servo4" class="val-badge">90°</span></h3>
+      <input type="range" min="0" max="180" value="90" class="slider" oninput="updateSlider('servo4', this.value)">
+    </div>
+
+    <!-- محرك القابض -->
+    <div class="card">
+      <h3>القابض (Gripper) <span id="val-grip" class="val-badge">90°</span></h3>
+      <input type="range" min="0" max="180" value="90" class="slider" oninput="updateSlider('grip', this.value)">
+    </div>
+
+  </div>
+
+  <!-- القسم الأيمن: المربع التفاعلي X/Y -->
+  <div class="panel-right">
+    <div class="card">
+      <h3>التحكم بالمحاور (Joints X / Y)</h3>
+      <div id="joystick-container">
+        <div id="joystick-handle"></div>
+      </div>
+      <div class="coord-display">
+        X: <span id="val-armX">90°</span> | Y: <span id="val-armY">90°</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ===== 1. إعدادات اتصال MQTT =====
+  const broker = "broker.hivemq.com";
+  const port = 8000; // منفذ WebSockets لـ HiveMQ
+  const topic = "ZM070_5G_EXT/control"; // القناة المطابقة لكود ESP32
+
+  // إنشاء اسم عميل عشوائي لمنع التداخل
+  const clientID = "WebClient_" + Math.random().toString(16).substr(2, 8);
+  const client = new Paho.MQTT.Client(broker, port, clientID);
+
+  const statusEl = document.getElementById("status-container");
+
+  // دالة انقطاع الاتصال
+  client.onConnectionLost = function (responseObject) {
+    statusEl.innerText = "انقطع الاتصال بالخادم!";
+    statusEl.className = "status-offline";
+  };
+
+  // الاتصال بخادم MQTT
+  client.connect({
+    onSuccess: function () {
+      statusEl.innerText = "متصل بالسيرفر وجاهز للتحكم!";
+      statusEl.className = "status-online";
+    },
+    onFailure: function (err) {
+      statusEl.innerText = "فشل الاتصال بالخادم!";
+      statusEl.className = "status-offline";
+    }
+  });
+
+  // ===== 2. دالة إرسال الرسائل لـ ESP32 =====
+  function sendData(name, val) {
+    if (client.isConnected()) {
+      const message = new Paho.MQTT.Message(name + ":" + val);
+      message.destinationName = topic;
+      client.send(message);
+    }
+  }
+
+  // تحديث السلايدرات
+  function updateSlider(name, val) {
+    document.getElementById("val-" + name).innerText = val + "°";
+    sendData(name, val);
+  }
+
+  // ===== 3. برمجة المربع التفاعلي (Joystick 325px) =====
+  const container = document.getElementById('joystick-container');
+  const handle = document.getElementById('joystick-handle');
+  let isDragging = false;
+
+  function handleMove(e) {
+    if (!isDragging) return;
+
+    const rect = container.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    // أبعاد المربع 325x325 والمقبض 50x50 (أقصى حركة هي 275px)
+    let x = clientX - rect.left - 25;
+    let y = clientY - rect.top - 25;
+
+    // التقييد داخل حدود المربع
+    if (x < 0) x = 0;
+    if (x > 275) x = 275;
+    if (y < 0) y = 0;
+    if (y > 275) y = 275;
+
+    handle.style.left = x + 'px';
+    handle.style.top = y + 'px';
+
+    // تحويل الإحداثيات إلى زوايا (0 - 180 درجة)
+    let angleX = Math.round((x / 275) * 180);
+    let angleY = Math.round((1 - (y / 275)) * 180); // عكس Y ليكون للأعلى قيمة أعلى
+
+    document.getElementById("val-armX").innerText = angleX + "°";
+    document.getElementById("val-armY").innerText = angleY + "°";
+
+    sendData('armX', angleX);
+    sendData('armY', angleY);
+  }
+
+  // مستمعي الأحداث للماوس واللمس
+  container.addEventListener('mousedown', (e) => { isDragging = true; handleMove(e); });
+  container.addEventListener('touchstart', (e) => { isDragging = true; handleMove(e); });
+
+  window.addEventListener('mouseup', () => isDragging = false);
+  window.addEventListener('touchend', () => isDragging = false);
+
+  container.addEventListener('mousemove', handleMove);
+  container.addEventListener('touchmove', handleMove);
+</script>
+
+</body>
+</html>
